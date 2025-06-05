@@ -1,0 +1,9 @@
+{
+  "name": "vercel-trade-pdf",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "googleapis": "^139.0.0",
+    "pdfkit": "^0.13.0"
+  }
+}
