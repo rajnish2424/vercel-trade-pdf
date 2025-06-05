@@ -1,86 +1,90 @@
+// File: api/generate-pdf.js
+
 import { google } from 'googleapis';
 import { Readable } from 'stream';
-import PDFDocument from 'pdfkit';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
-const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
-  scopes: ['https://www.googleapis.com/auth/drive'],
-});
-const drive = google.drive({ version: 'v3', auth });
+// Load service account key from env
+const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).send('Only POST allowed');
-  const { data } = req.body;
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  if (!data || !Array.isArray(data)) {
-    return res.status(400).json({ error: 'Invalid or missing data' });
+  const { rows, columns, fileName = 'Trade_Report.pdf' } = req.body;
+
+  if (!rows || !Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'Rows are required' });
   }
 
   try {
-    const pdfBuffer = await generatePDFBuffer(data);
-    const fileUrl = await uploadToDrive(pdfBuffer);
-    return res.status(200).json({ url: fileUrl });
-  } catch (err) {
-    console.error('Error:', err);
-    return res.status(500).json({ error: 'PDF generation/upload failed' });
-  }
-}
+    // 1. Generate PDF
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage();
+    const { width, height } = page.getSize();
 
-function generatePDFBuffer(data) {
-  return new Promise((resolve) => {
-    const doc = new PDFDocument();
-    const buffers = [];
+    const fontSize = 12;
+    const margin = 30;
+    const rowHeight = 20;
+    const startY = height - margin;
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-    doc.on('data', (chunk) => buffers.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    // Draw headers
+    let x = margin;
+    let y = startY;
 
-    doc.fontSize(18).text('Trade Summary', { align: 'center' });
-    doc.moveDown();
-
-    const columns = ['Stock', 'Price', 'Stop Loss', 'Target'];
-
-    doc.font('Helvetica-Bold').fontSize(12);
-    columns.forEach((col) => doc.text(col, { continued: true, width: 120 }));
-    doc.moveDown();
-
-    doc.font('Helvetica').fontSize(10);
-    data.forEach((row) => {
-      columns.forEach((col) => {
-        doc.text(String(row[col.toLowerCase()]), { continued: true, width: 120 });
-      });
-      doc.moveDown();
+    columns.forEach((col) => {
+      page.drawText(col, { x, y, size: fontSize, font, color: rgb(0, 0, 0) });
+      x += 120;
     });
 
-    doc.end();
-  });
-}
+    // Draw rows
+    y -= rowHeight;
+    rows.forEach((row) => {
+      x = margin;
+      columns.forEach((col) => {
+        const value = row[col] ? String(row[col]) : '';
+        page.drawText(value, { x, y, size: fontSize, font, color: rgb(0.2, 0.2, 0.2) });
+        x += 120;
+      });
+      y -= rowHeight;
+    });
 
-async function uploadToDrive(buffer) {
-  const fileName = `trade_summary_${Date.now()}.pdf`;
-  const stream = Readable.from(buffer);
+    const pdfBytes = await pdfDoc.save();
 
-  const uploadRes = await drive.files.create({
-    requestBody: {
+    // 2. Upload to Google Drive
+    const auth = new google.auth.GoogleAuth({
+      credentials: serviceAccount,
+      scopes: ['https://www.googleapis.com/auth/drive.file'],
+    });
+
+    const drive = google.drive({ version: 'v3', auth });
+    const bufferStream = new Readable();
+    bufferStream.push(Buffer.from(pdfBytes));
+    bufferStream.push(null);
+
+    const folderId = '1MFJxT0qmWfQ41C_m_rc7zm4IPe6ziDGB'; // Replace this with your real folder ID
+
+    const fileMetadata = {
       name: fileName,
-      parents: [process.env.GOOGLE_DRIVE_FOLDER_ID],
+      parents: [folderId],
+    };
+
+    const media = {
       mimeType: 'application/pdf',
-    },
-    media: {
-      mimeType: 'application/pdf',
-      body: stream,
-    },
-    fields: 'id',
-  });
+      body: bufferStream,
+    };
 
-  const fileId = uploadRes.data.id;
+    const response = await drive.files.create({
+      resource: fileMetadata,
+      media,
+      fields: 'id, webViewLink',
+    });
 
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      role: 'reader',
-      type: 'anyone',
-    },
-  });
-
-  return `https://drive.google.com/file/d/${fileId}/view`;
+    return res.status(200).json({ success: true, link: response.data.webViewLink });
+  } catch (error) {
+    console.error('PDF Generation/Upload Error:', error);
+    return res.status(500).json({ error: 'Failed to generate or upload PDF' });
+  }
 }
