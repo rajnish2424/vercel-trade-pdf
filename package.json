@@ -4,7 +4,7 @@
   "start": "next start"
 },
 "dependencies": {
-  "next": "...",
-  "react": "...",
-  "react-dom": "..."
+  "next": "15.4.0",  // Use the latest Next.js version
+  "react": "^19.1.0",  // Or whichever version of React you're using
+  "react-dom": "^19.1.0"  // Same version as react
 }
