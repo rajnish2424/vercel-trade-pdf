@@ -64,7 +64,7 @@ export default async function handler(req, res) {
     bufferStream.push(Buffer.from(pdfBytes));
     bufferStream.push(null);
 
-    const folderId = '1MFJxT0qmWfQ41C_m_rc7zm4IPe6ziDGB'; // Replace this with your real folder ID
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID; // Replace this with your real folder ID
 
     const fileMetadata = {
       name: fileName,
